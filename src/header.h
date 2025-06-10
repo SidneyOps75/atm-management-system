@@ -51,7 +51,7 @@ void transactionAcc(struct User u, char *accountNum);
 
 
 
-//utility functions
+//secondary functions
 bool isNamePresent(char *name);
 bool isPresent(char array[100][100], char* str);
 bool isAccountPresent(char *num, struct User u);
