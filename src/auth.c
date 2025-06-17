@@ -1,165 +1,192 @@
-#include <termios.h>
 #include "header.h"
-#include <unistd.h>
 
-char *USERS = "./data/users.txt";
-
-// display signup menu
-void signUpMenu(char a[50], char pass[50]){
-    struct termios oflags, nflags;
-
-    system("clear");
-    signup:
-    printf("\n\n\n\t\t\t\t  ============== REGISTER =============="); 
-    clearInputBuffer();
-    username:
-    printf("\n\n\t\t\t\tEnter Username:");
-    fgets(a, 50, stdin);
-
-    // Remove the newline character if it's read by fgets
-    if (a[strlen(a) - 1] == '\n') {
-        a[strlen(a) - 1] = '\0';  // Replace newline with null terminator
-    } else {
-        clearInputBuffer();  // Clear remaining input if user entered more than 49 characters
+ErrorCode validatePassword(const char *password) {
+    if (strlen(password) < MIN_PASSWORD_LENGTH) {
+        return ERROR_INVALID_INPUT;
     }
-    if (!is_valid_string(a)){
-        printf("\n\n\t\t\t\tPlease enter a valid name!");
-        goto username;
+    return SUCCESS;
+}
+
+ErrorCode validateUsername(const char *username) {
+    if (strlen(username) < 2 || strlen(username) >= MAX_USERNAME_LENGTH) {
+        return ERROR_INVALID_INPUT;
     }
     
-    sanitize(a);
-   
-    password:
-    printf("\n\n\t\t\t\tEnter Password:");
-
-    // Get the username
-    fgets(pass, 50, stdin);
-
-    // Remove the newline character if it's read by fgets
-    if (pass[strlen(pass) - 1] == '\n') {
-        pass[strlen(pass) - 1] = '\0';  // Replace newline with null terminator
-    } else {
-        clearInputBuffer();  // Clear remaining input if user entered more than 49 characters
+    if (!is_valid_string((char*)username)) {
+        return ERROR_INVALID_INPUT;
     }
-    if (strlen(pass) < 1){
-        printf("\n\n\t\t\t\tPlease enter a valid password!");
-        goto password;
-    }
-    sanitize(pass);
-    alphamirror(pass);
- 
+    
+    return SUCCESS;
+}
+
+ErrorCode signUpMenu(char *username, char *password) {
     FILE *fp;
-    char names[100][100]; 
+    char names[100][100];
     struct User userChecker;
     char id[5];
     int counter = 0;
-
-    if ((fp = fopen("./data/users.txt", "a+")) == NULL)
-    {
-        printf("Error! opening file");
-        exit(1);
+    ErrorCode result;
+    
+    printHeader("USER REGISTRATION");
+    
+    // Get username
+    while (1) {
+        result = getStringInput(username, MAX_USERNAME_LENGTH, "Enter Username", false);
+        if (result != SUCCESS) {
+            handleError(result, "Username must contain only letters and spaces");
+            continue;
+        }
+        
+        result = validateUsername(username);
+        if (result != SUCCESS) {
+            handleError(result, "Username must be 2-49 characters long");
+            continue;
+        }
+        
+        sanitize(username);
+        break;
     }
-
-    while (fscanf(fp, "%s %s %s", id, userChecker.name, userChecker.password) != EOF)
-    {
+    
+    // Get password
+    while (1) {
+        printf(COLOR_BOLD "Enter Password (minimum %d characters): " COLOR_RESET, MIN_PASSWORD_LENGTH);
+        
+        if (fgets(password, MAX_PASSWORD_LENGTH, stdin) == NULL) {
+            handleError(ERROR_INVALID_INPUT, "Failed to read password");
+            continue;
+        }
+        
+        // Remove newline
+        size_t len = strlen(password);
+        if (len > 0 && password[len-1] == '\n') {
+            password[len-1] = '\0';
+        } else {
+            clearInputBuffer();
+        }
+        
+        result = validatePassword(password);
+        if (result != SUCCESS) {
+            handleError(result, "Password too short");
+            continue;
+        }
+        
+        sanitize(password);
+        alphamirror(password);
+        break;
+    }
+    
+    // Open users file
+    fp = fopen(USERS_FILE, "a+");
+    if (fp == NULL) {
+        return ERROR_FILE_NOT_FOUND;
+    }
+    
+    // Read existing users
+    while (fscanf(fp, "%s %s %s", id, userChecker.name, userChecker.password) != EOF) {
         strcpy(names[counter], userChecker.name);
         counter++;
     }
-
-    if (counter != 0){
+    
+    // Check if user already exists
+    if (isPresent(names, username)) {
+        fclose(fp);
+        return ERROR_DUPLICATE_USER;
+    }
+    
+    // Add newline if file is not empty
+    if (counter != 0) {
         fprintf(fp, "\n");
     }
-
-    if(isPresent(names, a)){
-        system("clear");
-        printf("This user already exists!\n");
-        sleep(2);
-        goto username;
-    }
-    else{
-        fprintf(fp, "%d %s %s", counter, a, pass);
+    
+    // Write new user
+    if (fprintf(fp, "%d %s %s", counter, username, password) < 0) {
+        fclose(fp);
+        return ERROR_FILE_WRITE;
     }
     
     fclose(fp);
-};
+    return SUCCESS;
+}
 
-// display login menu
-void loginMenu(char a[50], char pass[50])
-{
+ErrorCode loginMenu(char *username, char *password) {
     struct termios oflags, nflags;
-
-    system("clear");
-    printf("\n\n\n\t\t\t\t============= LOGIN =============");
-     clearInputBuffer();
-    usernameLogin:
-    printf("\n\n\t\t\t\tEnter Username:");
-    fgets(a, 50, stdin);
-
-    if (a[strlen(a) - 1] == '\n') {
-        a[strlen(a) - 1] = '\0'; 
-    } else {
-        clearInputBuffer(); 
+    ErrorCode result;
+    
+    printHeader("USER LOGIN");
+    
+    // Get username
+    while (1) {
+        result = getStringInput(username, MAX_USERNAME_LENGTH, "Enter Username", false);
+        if (result != SUCCESS) {
+            handleError(result, "Please enter a valid username");
+            continue;
+        }
+        
+        sanitize(username);
+        break;
     }
-     if (!is_valid_string(a)){
-        printf("\n\n\t\t\t\tPlease enter a valid name!");
-        goto usernameLogin;
-    }
-    sanitize(a);
-
-    //disable echo
-    tcgetattr(fileno(stdin), &oflags);
+    
+    // Disable echo for password input
+    tcgetattr(STDIN_FILENO, &oflags);
     nflags = oflags;
     nflags.c_lflag &= ~ECHO;
     nflags.c_lflag |= ECHONL;
-
-    if (tcsetattr(fileno(stdin), TCSANOW, &nflags) != 0)
-    {
+    
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &nflags) != 0) {
         perror("tcsetattr");
-        exit(1);
+        return ERROR_INVALID_INPUT;
     }
-    printf("\n\n\t\t\t\tEnter Password:");
-    fgets(pass, 50, stdin);
-
-    if (pass[strlen(pass) - 1] == '\n') {
-        pass[strlen(pass) - 1] = '\0';  
+    
+    printf(COLOR_BOLD "Enter Password: " COLOR_RESET);
+    if (fgets(password, MAX_PASSWORD_LENGTH, stdin) == NULL) {
+        // Restore terminal
+        tcsetattr(STDIN_FILENO, TCSANOW, &oflags);
+        return ERROR_INVALID_INPUT;
+    }
+    
+    // Remove newline
+    size_t len = strlen(password);
+    if (len > 0 && password[len-1] == '\n') {
+        password[len-1] = '\0';
     } else {
-        clearInputBuffer(); 
+        clearInputBuffer();
     }
-    sanitize(pass);
-    alphamirror(pass);
-
-    // restore terminal
-    if (tcsetattr(fileno(stdin), TCSANOW, &oflags) != 0)
-    {
+    
+    sanitize(password);
+    alphamirror(password);
+    
+    // Restore terminal
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &oflags) != 0) {
         perror("tcsetattr");
-        exit(1);
+        return ERROR_INVALID_INPUT;
     }
-};
+    
+    return SUCCESS;
+}
 
-
-// retrieve password from storage
 const char *getPassword(struct User *u) {
     FILE *fp;
     struct User userChecker;
     char line[150];
     char id[10];
-
-    if ((fp = fopen("./data/users.txt", "r")) == NULL) {
-        printf("Error! opening file");
-        exit(1);
+    
+    fp = fopen(USERS_FILE, "r");
+    if (fp == NULL) {
+        return "file_error";
     }
-
+    
     while (fgets(line, sizeof(line), fp) != NULL) {
-        sscanf(line, "%s %s %s", id, userChecker.name, userChecker.password);
-
-        if (strcmp(userChecker.name, u->name) == 0) {
-            fclose(fp);
-            u->id = atoi(id);
-            char *buff = userChecker.password;
-            return buff;
+        if (sscanf(line, "%s %s %s", id, userChecker.name, userChecker.password) == 3) {
+            if (strcmp(userChecker.name, u->name) == 0) {
+                fclose(fp);
+                u->id = atoi(id);
+                static char password[MAX_PASSWORD_LENGTH];
+                strcpy(password, userChecker.password);
+                return password;
+            }
         }
     }
-
+    
     fclose(fp);
-    return "no user found";
+    return "no_user_found";
 }
