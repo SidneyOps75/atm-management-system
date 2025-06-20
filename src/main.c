@@ -96,6 +96,7 @@ ErrorCode handleTransaction(struct User u) {
     // Check if transactions are allowed for this account
     result = transactionAcc(u, accountNum);
     if (result != SUCCESS) {
+        handleError(result, "Fixed accounts do not allow withdrawals or deposits");
         return result;
     }
     
